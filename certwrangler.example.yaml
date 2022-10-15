@@ -1,0 +1,44 @@
+---
+
+accounts:
+  default:
+    emails:
+      - this.is.me@example.com
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    key_size: 4096
+
+subjects:
+  # This feature can probably be removed, Let's Encrypt doesn't both with using them.
+  default:
+    country: US
+    state_or_province: Texas
+    locality: San Antonio
+    organization: Example Org
+    organizational_unit: DevOps
+
+stores:
+  default:
+    driver: local
+    config:
+      path: ./test_store
+
+solvers:
+  default:
+    driver: lexicon
+    config:
+      provider_name: linode4
+      provider_options:
+        auth_token: thisismytoken
+
+certs:
+  example.com:
+    # The next three options are set by default
+    # store: default
+    # solver: default
+    # subject: default
+    common_name: example.com
+    alt_names:
+      - www.example.com
+    key_size: 4096
+    wait_time: 120
+

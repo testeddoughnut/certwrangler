@@ -19,7 +19,7 @@ def _load_config_to_ctx(ctx, initialize: bool = False) -> None:
         if initialize:
             ctx.obj["config"].initialize()
     except (NoConfigFile, ValidationError) as error:
-        log.fatal(f"Failed to read configuration: {error}")
+        log.fatal(f"Failure loading config: {error}")
         ctx.exit(1)
 
 
@@ -96,7 +96,7 @@ def daemon(ctx, sleep) -> None:
 def check_config(ctx) -> None:
     """Check that the provided config is valid."""
 
-    load_config(ctx.obj["config_path"])
+    _load_config_to_ctx(ctx)
     click.secho(" ✅ - Config file loaded successfully.", fg="green")
 
 
