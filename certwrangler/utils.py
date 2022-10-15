@@ -14,7 +14,7 @@ def load_config(config_file: str) -> dict:
     return config
 
 
-def configure_logging(log_level):
+def configure_logging(log_level) -> None:
     # First configure the application logger.
     log_handler = logging.StreamHandler(sys.stdout)
     log_handler.setFormatter(
