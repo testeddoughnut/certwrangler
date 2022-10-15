@@ -215,7 +215,7 @@ Domain = NewType(
     str,
     validate=marshmallow.validate.Regexp(
         # taken from https://github.com/python-validators/validators/blob/0.20.0/validators/domain.py#L5-L10
-        r"^(?:[a-zA-Z0-9]"  # First character of the domain
+        r"^(?:(\*\.|[a-zA-Z0-9])"  # First character of the domain (including wildcard)
         r"(?:[a-zA-Z0-9-_]{0,61}[A-Za-z0-9])?\.)"  # Sub domain + hostname
         r"+[A-Za-z0-9][A-Za-z0-9-_]{0,61}"  # First 61 characters of the gTLD
         r"[A-Za-z]$"
