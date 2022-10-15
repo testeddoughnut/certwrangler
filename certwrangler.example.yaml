@@ -8,7 +8,7 @@ accounts:
     key_size: 4096
 
 subjects:
-  # This feature can probably be removed, Let's Encrypt doesn't both with using them.
+  # This feature can probably be removed, Let's Encrypt doesn't bother with using them.
   default:
     country: US
     state_or_province: Texas
