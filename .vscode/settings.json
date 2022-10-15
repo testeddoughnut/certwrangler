@@ -1,0 +1,27 @@
+{
+    "python.formatting.provider": "black",
+    "editor.formatOnSave": true,
+    "cSpell.words": [
+        "authzr",
+        "certbot",
+        "certwrangler",
+        "chall",
+        "cnames",
+        "dataclass",
+        "dnspython",
+        "fullchain",
+        "hvac",
+        "josepy",
+        "JWKRSA",
+        "levelname",
+        "NXDOMAIN",
+        "polyfield",
+        "Rdata",
+        "rdatatype",
+        "rdtype",
+        "secho",
+        "SIGHUP"
+    ],
+    "files.insertFinalNewline": true,
+    "files.trimTrailingWhitespace": true
+}
