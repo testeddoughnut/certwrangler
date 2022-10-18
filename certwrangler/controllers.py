@@ -67,7 +67,7 @@ class AccountController:
         )
         self.account.state = AccountState(key=new_key, key_size=self.account.key_size)
         self.account.save()
-        self.client = _get_acme_client(self.account)
+        self._client = _get_acme_client(self.account)
 
     def register(self) -> None:
         """
@@ -145,7 +145,7 @@ class AccountController:
         )
         self.account.save()
         # Get a new client since the key changed.
-        self.client = _get_acme_client(self.account)
+        self._client = _get_acme_client(self.account)
         # Then get our new registration
         self.get_registration()
 
