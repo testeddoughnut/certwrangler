@@ -1,5 +1,6 @@
 certwrangler.yaml
 test_store/
+test_store_backup/
 
 # local env files
 .env.local

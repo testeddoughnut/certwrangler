@@ -1,7 +1,6 @@
 import logging
-from dataclasses import field
-from typing import Dict
-from marshmallow_dataclass import dataclass
+from dataclasses import dataclass, field
+from marshmallow_dataclass import add_schema
 from lexicon.client import Client
 from lexicon.config import ConfigResolver
 from certwrangler.models import Solver, SolverDriver
@@ -10,6 +9,7 @@ from certwrangler.models import Solver, SolverDriver
 log = logging.getLogger(__name__)
 
 
+@add_schema
 @dataclass
 class LexiconSolver(SolverDriver):
     """Solver powered by lexicon"""
@@ -36,7 +36,7 @@ class LexiconSolver(SolverDriver):
         lexicon_config = ConfigResolver().with_dict(config_dict)
         Client(lexicon_config).execute()
 
-    def _build_config(self, action: str, name: str, domain: str, content: str) -> Dict:
+    def _build_config(self, action: str, name: str, domain: str, content: str) -> dict:
         return {
             "action": action,
             "name": name,

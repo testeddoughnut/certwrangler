@@ -1,13 +1,12 @@
 import pathlib
-from datetime import timedelta
 import marshmallow
 import marshmallow_polyfield
 import josepy as jose
-from acme import messages, challenges
+from acme import messages
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric.types import PRIVATE_KEY_TYPES
 from marshmallow_dataclass import NewType
 
 
@@ -26,7 +25,7 @@ class RSAKeyType(marshmallow.fields.Field):
             encryption_algorithm=serialization.NoEncryption(),
         ).decode()
 
-    def _deserialize(self, value, *args, **kwargs) -> rsa.RSAPrivateKey:
+    def _deserialize(self, value, *args, **kwargs) -> PRIVATE_KEY_TYPES:
         return serialization.load_pem_private_key(value.encode(), password=None)
 
 
@@ -56,7 +55,7 @@ class JWKRSAKeyType(marshmallow.fields.Field):
             return None
         return value.to_json()
 
-    def _deserialize(self, value, *args, **kwargs) -> jose.JWKRSA:
+    def _deserialize(self, value, *args, **kwargs) -> jose.TypedJSONObjectWithFields:
         return jose.JWKRSA.from_json(value)
 
 
@@ -169,7 +168,7 @@ class OrderType(marshmallow.fields.Field):
             return None
         return value.to_json()
 
-    def _deserialize(self, value, *args, **kwargs) -> messages.OrderResource:
+    def _deserialize(self, value, *args, **kwargs) -> messages.OrderResource | None:
         if value is None:
             return None
         body = messages.Order.from_json(value["body"])

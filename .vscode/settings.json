@@ -11,6 +11,7 @@
         "dnspython",
         "fullchain",
         "hvac",
+        "ipapp",
         "josepy",
         "JWKRSA",
         "levelname",

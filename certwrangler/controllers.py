@@ -1,6 +1,5 @@
 import logging
 import time
-from typing import Iterator
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes
@@ -272,6 +271,7 @@ class CertController:
         )
         self.cert.state.url = self.cert.state.order.body.certificate
         self.cert.save()
+        self.cert.publish()
         log.info(f"Order complete for cert '{self.cert.name}'.")
 
     def clean_up(self) -> None:
@@ -329,7 +329,7 @@ class CertController:
 
     def _get_challenges(
         self, completed: bool = False
-    ) -> list[tuple[str, acme_challenges.DNS01]]:
+    ) -> list[tuple[str, acme_messages.ChallengeBody]]:
         # First check for any errors
         errors = []
         for authz in self.cert.state.order.authorizations:

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import abc
+import json
 import logging
+import pathlib
 from datetime import datetime, timedelta
 import marshmallow
 from dataclasses import field
 from importlib.metadata import entry_points
-from typing import Dict, List, Type
+from typing import Type, NoReturn
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 from marshmallow_dataclass import dataclass
@@ -81,19 +83,7 @@ class StoreDriver(BaseDriver, metaclass=abc.ABCMeta):
         raise NotImplemented
 
     @abc.abstractmethod
-    def load_account(self, account: Account) -> AccountState:
-        raise NotImplemented
-
-    @abc.abstractmethod
-    def save_account(self, account: Account) -> None:
-        raise NotImplemented
-
-    @abc.abstractmethod
-    def load_cert(self, cert: Cert) -> CertState:
-        raise NotImplemented
-
-    @abc.abstractmethod
-    def save_cert(self, cert: Cert) -> None:
+    def publish(self, cert: Cert) -> None:
         raise NotImplemented
 
 
@@ -108,17 +98,19 @@ class SolverDriver(BaseDriver, metaclass=abc.ABCMeta):
         pass
 
     @abc.abstractmethod
-    def create(self, domain: str, content: str, delegated: str = None) -> None:
+    def create(self, name: str, domain: str, content: str) -> None:
         raise NotImplemented
 
     @abc.abstractmethod
-    def delete(self, domain: str, content: str, delegated: str = None) -> None:
+    def delete(self, name: str, domain: str, content: str) -> None:
         raise NotImplemented
 
 
 @dataclass
 class DriverController:
     """Models that are responsible for controlling a driver."""
+
+    name: str
 
     def initialize(self) -> None:
         self.driver.initialize(self)
@@ -131,7 +123,6 @@ class DriverController:
 class Store(DriverController):
     """Store controller."""
 
-    name: str
     driver_name: str = field(metadata={"data_key": "driver", "required": True})
     driver: PolyField = field(
         default_factory=dict,
@@ -141,24 +132,14 @@ class Store(DriverController):
         },
     )
 
-    def load(self, obj: Account | Cert) -> AccountState | CertState:
-        if isinstance(obj, Account):
-            return self.driver.load_account(obj)
-        elif isinstance(obj, Cert):
-            return self.driver.load_cert(obj)
-
-    def save(self, obj: Account | Cert) -> None:
-        if isinstance(obj, Account):
-            self.driver.save_account(obj)
-        elif isinstance(obj, Cert):
-            self.driver.save_cert(obj)
+    def publish(self, cert: Cert) -> NoReturn:
+        self.driver.publish(cert)
 
 
 @dataclass
 class Solver(DriverController):
     """ACME solver controller."""
 
-    name: str
     driver_name: str = field(metadata={"data_key": "driver", "required": True})
     driver: PolyField = field(
         default_factory=dict,
@@ -179,15 +160,35 @@ class Solver(DriverController):
 class Stateful:
     """Models that save their state to the store."""
 
-    __state_class__ = None
+    name: str
+
+    def __post_init__(self) -> None:
+        self.state_subdir = None
+        self.state_class = None
+
+    def initialize(self, state_path: pathlib.Path) -> None:
+        self.state_path = state_path.joinpath(f"{self.state_subdir}/{self.name}.json")
 
     def load(self) -> None:
-        """Load our state from the store"""
-        self.state = self.store.load(self) or self.__state_class__()
+        """Load our state"""
+
+        if not self.state_path.exists():
+            self.state = self.state_class()
+        else:
+            with open(self.state_path, "r") as file_handler:
+                self.state = self.state_class.Schema().load(json.load(file_handler))
+            log.debug(
+                f"{self.__class__.__name__} '{self.name}' state loaded from '{self.state_path}'"
+            )
 
     def save(self) -> None:
-        """Save our state to the store"""
-        self.store.save(self)
+        """Save our state"""
+
+        with open(self.state_path, "w") as file_handler:
+            json.dump(self.state.Schema().dump(self.state), file_handler, indent=4)
+            log.debug(
+                f"{self.__class__.__name__} '{self.name}' state saved to '{self.state_path}'"
+            )
 
 
 @dataclass
@@ -203,20 +204,20 @@ class AccountState:
 class Account(Stateful):
     """ACME account"""
 
-    __state_class__ = AccountState
-
-    name: str
-    emails: List[Email] = field(metadata={"required": True})
-    store_name: str = field(default="default", metadata={"data_key": "store"})
+    emails: list[Email] = field(metadata={"required": True})
     server: Url = "https://acme-v02.api.letsencrypt.org/directory"
     key_size: int = 2048
+
+    def __post_init__(self) -> None:
+        self.state_subdir = "accounts"
+        self.state_class = AccountState
 
 
 @dataclass
 class Subject:
     """Cert subject."""
 
-    name: str = None
+    name: str
     country: CountryNameOID = None
     state_or_province: StateOrProvinceOID = None
     locality: LocalityOID = None
@@ -239,15 +240,14 @@ class CertState:
 class Cert(Stateful):
     """Managed cert"""
 
-    __state_class__ = CertState
-
-    name: str
     common_name: Domain = field(metadata={"required": True})
-    store_name: str = field(default="default", metadata={"data_key": "store"})
+    stores_names: list[str] = field(
+        default_factory=lambda: ["default"], metadata={"data_key": "stores"}
+    )
     account_name: str = field(default="default", metadata={"data_key": "account"})
     solver_name: str = field(default="default", metadata={"data_key": "solver"})
     subject_name: str = field(default="default", metadata={"data_key": "subject"})
-    alt_names: List[Domain] = field(default_factory=list)
+    alt_names: list[Domain] = field(default_factory=list)
     wait_time: int = 60
     key_size: int = 2048
     follow_cnames: bool = True
@@ -255,37 +255,53 @@ class Cert(Stateful):
         default=timedelta(days=30), metadata={"precision": "days"}
     )
 
+    def __post_init__(self) -> None:
+        self.state_subdir = "certs"
+        self.state_class = CertState
+        self.account = None
+        self.solver = None
+        self.stores = []
+        self.subject = None
+
+    def publish(self) -> None:
+        """Publish our cert and key to the stores."""
+        for store in self.stores:
+            store.publish(self)
+
+    @marshmallow.validates("stores_names")
+    def __validate_unique_stores(self, values) -> NoReturn:
+        if len(set(values)) != len(values):
+            raise marshmallow.ValidationError("Duplicate stores not allowed.")
+
     @property
-    def time_left(self) -> timedelta:
+    def time_left(self) -> timedelta | None:
         if not self.state.cert:
             return None
         return self.state.cert.not_valid_after - datetime.now()
 
     @property
-    def needs_renewal(self) -> tuple[bool, list[str]]:
+    def needs_renewal(self) -> bool:
         """
         Check if a cert needs to be renewed.
 
         We specifically don't check for the subject since apparently LE strips that
         out, leaving only the CN.
         """
-        needs_renewal = False
-        reasons = []
         if not self.state.cert:
-            needs_renewal = True
-            reasons.append("No cert present in state.")
+            log.info(f"No cert present in state for cert '{self.name}'.")
+            return True
         if self.time_left < self.renewal_threshold:
-            needs_renewal = True
-            reasons.append(
-                f"Cert expires in '{self.time_left.days}, (threshold "
-                f"{self.renewal_threshold.days}).'"
+            log.info(
+                f"Cert '{self.name}' expires in '{self.time_left.days}, "
+                f"(threshold {self.renewal_threshold.days}).'"
             )
+            return True
         state_common_name = self.state.cert.subject.get_attributes_for_oid(
             NameOID.COMMON_NAME
         )[0].value
         if self.common_name != state_common_name:
-            needs_renewal = True
-            reasons.append("Common name changed.")
+            log.info(f"Common name changed on cert '{self.name}'.")
+            return True
         # This only works for certs with DNS alt names
         alt_names = sorted(
             self.state.cert.extensions.get_extension_for_class(
@@ -293,20 +309,20 @@ class Cert(Stateful):
             ).value.get_values_for_type(x509.general_name.DNSName)
         )
         if sorted([self.common_name] + self.alt_names) != alt_names:
-            needs_renewal = True
-            reasons.append("Alt names changed.")
-        return needs_renewal, reasons
+            log.info(f"Alternative names changed on cert '{self.name}'.")
+            return True
+        return False
 
 
 @dataclass
 class Config:
     """Config"""
 
-    accounts: Dict[str, Account] = field(metadata={"required": True})
-    certs: Dict[str, Cert] = field(metadata={"required": True})
-    solvers: Dict[str, Solver] = field(metadata={"required": True})
-    stores: Dict[str, Store] = field(metadata={"required": True})
-    subjects: Dict[str, Subject] = field(metadata={"required": True})
+    accounts: dict[str, Account] = field(metadata={"required": True})
+    certs: dict[str, Cert] = field(metadata={"required": True})
+    solvers: dict[str, Solver] = field(metadata={"required": True})
+    stores: dict[str, Store] = field(metadata={"required": True})
+    subjects: dict[str, Subject] = field(metadata={"required": True})
 
     @marshmallow.pre_load
     def __pre_populate(self, data: dict, **kwargs) -> dict:
@@ -325,46 +341,56 @@ class Config:
         return data
 
     def __post_init__(self) -> None:
-        """Populate all the refs"""
-
-        def _populate_refs(
-            obj_collection_name: str,
-            obj_attr: str,
-            ref_collection_name: str,
-            errors: dict,
-        ) -> dict:
-            obj_collection = getattr(self, obj_collection_name)
-            ref_collection = getattr(self, ref_collection_name)
-            collection_errors = {}
-            for obj_name, obj in obj_collection.items():
-                obj_errors = {}
-                name_attr = f"{obj_attr}_name"
-                ref_name = getattr(obj, name_attr)
-                try:
-                    setattr(obj, obj_attr, ref_collection[ref_name])
-                except KeyError:
-                    obj_errors[obj_attr] = f"No {obj_attr} named '{ref_name}'"
-                if obj_errors:
-                    collection_errors[obj_name] = obj_errors
-            if collection_errors:
-                errors[obj_collection_name] = collection_errors
-
+        """Populate refs on all the certs"""
         errors = {}
-        _populate_refs("accounts", "store", "stores", errors)
-        _populate_refs("certs", "account", "accounts", errors)
-        _populate_refs("certs", "solver", "solvers", errors)
-        _populate_refs("certs", "store", "stores", errors)
-        _populate_refs("certs", "subject", "subjects", errors)
+        for cert in self.certs.values():
+            cert_errors = {}
+            # Set account ref
+            try:
+                cert.account = self.accounts[cert.account_name]
+            except KeyError:
+                cert_errors["account"] = f"No account named '{cert.account_name}'."
+            # Set solver ref
+            try:
+                cert.solver = self.solvers[cert.solver_name]
+            except KeyError:
+                cert_errors["solver"] = f"No solver named '{cert.solver_name}'."
+            # Set subject ref
+            try:
+                cert.subject = self.subjects[cert.subject_name]
+            except KeyError:
+                cert_errors["subject"] = f"No subject named '{cert.subject_name}'."
+            # Set store refs
+            cert.stores = []
+            stores_errors = []
+            for store_name in cert.stores_names:
+                try:
+                    cert.stores.append(self.stores[store_name])
+                except KeyError:
+                    stores_errors.append(f"No store named '{store_name}'.")
+            if stores_errors:
+                cert_errors["stores"] = " ".join(stores_errors)
+            if cert_errors:
+                errors[cert.name] = cert_errors
         if errors:
-            raise marshmallow.ValidationError(errors)
+            raise marshmallow.ValidationError({"certs": errors})
 
-    def initialize(self) -> None:
+    def initialize(self, state_path: pathlib.Path) -> None:
         """
         Initialize drivers and load state on stateful objects.
         """
+        # Make our states directories
+        for obj_type in ["accounts", "certs"]:
+            obj_states_path = state_path.joinpath(obj_type)
+            if not obj_states_path.exists():
+                log.info(
+                    f"Creating directory '{obj_states_path}' for {obj_type} states."
+                )
+                obj_states_path.mkdir(parents=True)
         driver_controllers = list(self.stores.values()) + list(self.solvers.values())
         for driver_controller in driver_controllers:
             driver_controller.initialize()
         stateful_objects = list(self.accounts.values()) + list(self.certs.values())
         for stateful_object in stateful_objects:
+            stateful_object.initialize(state_path)
             stateful_object.load()

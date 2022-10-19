@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime, timedelta
 from certwrangler.controllers import AccountController, CertController
 from certwrangler.models import Config, Account, Cert
 
@@ -51,14 +50,16 @@ def reconcile_cert(cert: Cert) -> None:
     if not cert.state.key:
         log.info(f"No key found for cert '{cert.name}', creating...")
         controller.create_key()
-    needs_renewal, reasons = cert.needs_renewal
-    if not cert.state.cert and not cert.state.order:
-        log.info(f"No cert found for cert '{cert.name}', submitting order...")
-        controller.create_order()
-    elif needs_renewal and not cert.state.order:
-        log.info(f"Cert '{cert.name}' needs renewal: {' '.join(reasons)} Renewing...")
-        controller.create_order()
     if cert.state.order:
         log.info(f"Open order found for cert '{cert.name}', processing...")
         controller.process_order()
+    elif not cert.state.cert:
+        log.info(f"No cert found for cert '{cert.name}', submitting order...")
+        controller.create_order()
+    elif cert.needs_renewal:
+        log.info(f"Cert '{cert.name}' needs renewal, renewing...")
+        controller.create_order()
+    else:
+        # Just make sure we're published to all of our stores.
+        cert.publish()
     log.info(f"Finished reconciling cert '{cert.name}'.")

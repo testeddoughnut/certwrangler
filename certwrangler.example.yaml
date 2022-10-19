@@ -21,6 +21,11 @@ stores:
     driver: local
     config:
       path: ./test_store
+  # An example store for backing up our cert and keys
+  backup:
+    driver: local
+    config:
+      path: ./test_store_backup
 
 solvers:
   default:
@@ -28,14 +33,18 @@ solvers:
     config:
       provider_name: linode4
       provider_options:
-        auth_token: thisismytoken
+        auth_token: this_is_my_token
 
 certs:
   example.com:
     # The next three options are set by default
-    # store: default
+    # stores:
+      # - default
     # solver: default
     # subject: default
+    stores:
+      - default
+      - backup
     common_name: example.com
     alt_names:
       - www.example.com
