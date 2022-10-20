@@ -30,6 +30,10 @@ stores:
 solvers:
   default:
     driver: lexicon
+    zones:
+      # List out the zones that this solver should be used for.
+      # This should only be zones, as in an SOA record exists for this FQDN.
+      - example.com
     config:
       provider_name: linode4
       provider_options:
@@ -40,7 +44,6 @@ certs:
     # The next three options are set by default
     # stores:
       # - default
-    # solver: default
     # subject: default
     stores:
       - default
@@ -49,5 +52,8 @@ certs:
     alt_names:
       - www.example.com
     key_size: 4096
-    wait_time: 120
+    # The timeout for waiting for DNS propagation.
+    # If this expires certwrangler gives up on waiting
+    # but leaves the order open to try again on the next run.
+    wait_timeout: 120
 

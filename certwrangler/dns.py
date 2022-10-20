@@ -1,21 +1,61 @@
+import logging
+import time
+from datetime import datetime, timedelta
+from click import pass_context
 from dns.rdatatype import RdataType
 from dns.resolver import NXDOMAIN, NoAnswer, Resolver
 from dns.message import QueryMessage
 
 
-def get_resolver(nameservers: list[str] = None) -> Resolver:
+log = logging.getLogger(__name__)
+
+
+@pass_context
+def get_resolver(ctx) -> Resolver:
     resolver = Resolver()
-    if nameservers:
+    if nameservers := ctx.obj.get("nameservers"):
         resolver.nameservers = nameservers
     return resolver
 
 
-def check_challenge(name: str, token: str, nameservers: list[str] = None) -> bool:
-    pass
+def wait_for_challenges(
+    dns_records: list[tuple[str, str]],
+    wait_timeout: timedelta,
+) -> None:
+    """
+    Wait for our DNS challenges to propagate.
+    TODO: this should probably be switched to async operations to clean up the code.
+    """
+    resolver = get_resolver()
+    challenges = {
+        name: {"passed": False, "token": token} for name, token in dns_records
+    }
+    stop_time = datetime.now() + wait_timeout
+    while datetime.now() < stop_time:
+        for name, info in challenges.items():
+            if info["passed"]:
+                continue
+            try:
+                answers = resolver.resolve(name, rdtype=RdataType.TXT)
+            except (NXDOMAIN, NoAnswer):
+                continue
+            for answer in answers:
+                if answer.rdtype == RdataType.TXT:
+                    if answer.strings[0].decode() == info["token"]:
+                        challenges[name]["passed"] = True
+        if all([info["passed"] for info in challenges.values()]):
+            return
+        time.sleep(5)
+    waiting_names = ", ".join(
+        [name for name, info in challenges.items() if not info["passed"]]
+    )
+    raise TimeoutError(
+        f"Timeout expired for DNS propagation of following records: {waiting_names}."
+    )
 
 
-def resolve_cname(name: str, nameservers: list[str] = None) -> str:
-    resolver = get_resolver(nameservers)
+def resolve_cname(name: str) -> str:
+    resolver = get_resolver()
     current_name = name
     visited = [current_name]
 
@@ -32,10 +72,10 @@ def resolve_cname(name: str, nameservers: list[str] = None) -> str:
             visited.append(current_name)
         except (NXDOMAIN, NoAnswer):
             # No more CNAME in the chain, we have the final canonical_name
-            return current_name
+            return current_name.rstrip(".")
 
 
-def resolve_zone(name: str, nameservers: list[str] = None) -> str:
+def resolve_zone(name: str) -> str:
     """
     Climb through the domain tree until we find the SOA for the zone.
     """
@@ -46,7 +86,7 @@ def resolve_zone(name: str, nameservers: list[str] = None) -> str:
                 return True
         return False
 
-    resolver = get_resolver(nameservers)
+    resolver = get_resolver()
     split_name = name.rstrip(".").split(".")
     for index, _ in enumerate(split_name):
         domain = ".".join(split_name[index:])

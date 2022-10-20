@@ -39,6 +39,8 @@ Options:
   -l, --log-level [CRITICAL|ERROR|WARNING|INFO|DEBUG]
                                   Logging level for certwrangler.  [env var:
                                   CERTWRANGLER_LOG_LEVEL; default: INFO]
+  -n, --nameserver TEXT           Nameservers that certwrangler should use.
+                                  [env var: CERTWRANGLER_NAMESERVERS]
   --help                          Show this message and exit.
 
 Commands:
@@ -55,15 +57,13 @@ $ certwrangler dev-shell
 Welcome to certwrangler's development shell!
   Python 3.10.7 (main, Sep 14 2022, 22:35:07) [GCC 11.3.0] on linux.
 Loaded certwrangler variables:
-  config
-  config_path
-  state_path
+  ctx
   controllers
   dns
   models
   reconcilers
 Config loaded but not initialized, initialize with:
-  config.initialize(state_path)
+  ctx.obj['config'].initialize(ctx.obj['state_path'])
 
 In [1]:
 ```

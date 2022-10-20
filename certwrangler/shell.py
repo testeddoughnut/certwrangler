@@ -6,6 +6,7 @@ import signal
 import sys
 import time
 from functools import partial
+from ipaddress import ip_address
 import click
 import yaml
 from marshmallow import ValidationError
@@ -49,6 +50,15 @@ def _configure_logging(log_level) -> None:
         _logger.setLevel(log_level)
 
 
+def _validate_nameservers(ctx, param, values) -> list[str]:
+    for value in values:
+        try:
+            ip_address(value)
+        except ValueError:
+            raise click.BadParameter(f"Nameserver '{value}' is not a valid IP address.")
+    return list(values)
+
+
 click_option = partial(  # pylint: disable=invalid-name
     click.option, show_default=True, show_envvar=True
 )
@@ -86,14 +96,25 @@ click_option = partial(  # pylint: disable=invalid-name
     show_default=True,
     show_envvar=True,
 )
+@click_option(
+    "nameservers",
+    "--nameserver",
+    "-n",
+    multiple=True,
+    envvar="CERTWRANGLER_NAMESERVERS",
+    help="Nameservers that certwrangler should use.",
+    show_envvar=True,
+    callback=_validate_nameservers,
+)
 @click.pass_context
-def cli(ctx, config, state, log_level) -> None:
+def cli(ctx, config, state, log_level, nameservers) -> None:
     """The certwrangler management cli."""
 
     ctx.ensure_object(dict)
     ctx.obj["config_path"] = config
     ctx.obj["state_path"] = state
     ctx.obj["log_level"] = log_level
+    ctx.obj["nameservers"] = nameservers
     _configure_logging(ctx.obj["log_level"])
 
 
@@ -165,9 +186,7 @@ if importlib.util.find_spec("IPython"):
         from certwrangler import controllers, dns, models, reconcilers
 
         user_ns = {
-            "config": ctx.obj["config"],
-            "config_path": ctx.obj["config_path"],
-            "state_path": ctx.obj["state_path"],
+            "ctx": ctx,
             "controllers": controllers,
             "dns": dns,
             "models": models,
@@ -180,7 +199,7 @@ if importlib.util.find_spec("IPython"):
             f"  Python {sys.version} on {sys.platform}.\n"
             f"Loaded certwrangler variables:\n  {avail_vars}\n"
             f"Config loaded but not initialized, initialize with:\n"
-            f"  config.initialize(state_path)\n"
+            f"  ctx.obj['config'].initialize(ctx.obj['state_path'])\n"
         )
 
         IPython.start_ipython(

@@ -1,5 +1,4 @@
 import logging
-import time
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes
@@ -13,12 +12,19 @@ from acme import errors as acme_errors
 from acme import jws as acme_jws
 from acme import messages as acme_messages
 
-from certwrangler.dns import resolve_cname, resolve_zone
-from certwrangler.exceptions import ControllerError
-from certwrangler.models import Account, AccountState, Cert, CertState
+from certwrangler.dns import (
+    resolve_cname,
+    resolve_zone,
+    wait_for_challenges,
+)
+from certwrangler.models import Account, AccountState, Cert, CertState, Solver
 
 USER_AGENT = "certwrangler"
 log = logging.getLogger(__name__)
+
+
+class ControllerError(Exception):
+    """Failure during controller operation"""
 
 
 class AccountKeyChangeMessage(acme_messages.ResourceBody):
@@ -176,7 +182,6 @@ class CertController:
         # Load to ensure we have the update state from the store.
         self.cert.load()
         self._client = None
-        self._dns_records = None
 
     @property
     def client(self) -> acme_client.ClientV2:
@@ -213,12 +218,9 @@ class CertController:
             try:
                 self.process_challenges()
                 self.finalize_order()
-            # TODO: this shouldn't fail the order on validation error
-            # we should instead be retrying.
-            except (ValueError, acme_errors.ValidationError) as error:
-                # Something broke, fail the order
-                self._fail_order(error)
-                return
+            except (ValueError, acme_errors.ValidationError, TimeoutError) as error:
+                # Something broke
+                raise ControllerError(error)
             self.clean_up()
             return
         elif order.body.status in [
@@ -229,8 +231,7 @@ class CertController:
                 self.finalize_order()
             except (ValueError, acme_errors.ValidationError) as error:
                 # Something broke, fail the order
-                self._fail_order(error)
-                return
+                raise ControllerError(error)
             self.clean_up()
             return
         elif order.body.status == acme_messages.STATUS_VALID:
@@ -251,13 +252,17 @@ class CertController:
 
         challenges = self._get_challenges()
         # Create the TXT records
-        for name, zone, token in self._get_dns_records():
-            self.cert.solver.create(name, zone, token)
-        # TODO: do something better than a sleep here
+        dns_records = self._get_dns_records()
+        for name, zone, token, solver in dns_records:
+            solver.create(name, zone, token)
+        wait_timeout = self.cert.wait_timeout
         log.info(
-            f"DNS records created for cert '{self.cert.name}', sleeping {self.cert.wait_time} seconds..."
+            f"DNS records created for cert '{self.cert.name}', waiting max {wait_timeout.seconds} seconds..."
         )
-        time.sleep(self.cert.wait_time)
+        wait_for_challenges(
+            [(f"{name}.{zone}", token) for name, zone, token, _ in dns_records],
+            wait_timeout,
+        )
         log.info(f"Submitting challenges for validation for cert '{self.cert.name}'...")
         for _, challenge in challenges:
             self.client.answer_challenge(
@@ -275,8 +280,8 @@ class CertController:
         log.info(f"Order complete for cert '{self.cert.name}'.")
 
     def clean_up(self) -> None:
-        for name, zone, token in self._get_dns_records(completed=True):
-            self.cert.solver.delete(name, zone, token)
+        for name, zone, token, solver in self._get_dns_records(completed=True):
+            solver.delete(name, zone, token)
         self.cert.state.order = None
         self.cert.save()
 
@@ -355,7 +360,9 @@ class CertController:
                         challenges.append((domain, challenge))
         return challenges
 
-    def _get_dns_records(self, completed: bool = False) -> list[tuple[str, str, str]]:
+    def _get_dns_records(
+        self, completed: bool = False
+    ) -> list[tuple[str, str, str, Solver]]:
         dns_records = []
         challenges = self._get_challenges(completed)
         for domain, challenge in challenges:
@@ -365,14 +372,12 @@ class CertController:
             zone = resolve_zone(challenge_name)
             name = ".".join(challenge_name.split(".")[: -len(zone.split("."))])
             token = challenge.validation(self.cert.account.state.key)
-            dns_records.append((name, zone, token))
+            solver = self.cert.get_solver_for_zone(zone)
+            dns_records.append((name, zone, token, solver))
         return dns_records
 
     def _fail_order(self, error: Exception = None) -> None:
         # Trash the order and try again on the next loop
-        error_msg = f"Removing invalid order for cert '{self.cert.name}'."
-        if error:
-            error_msg = f"{error_msg} Error: {error}"
-        log.warning(error_msg)
+        log.error(f"Removing invalid order for cert '{self.cert.name}'.")
         self.clean_up()
-        return
+        raise ControllerError(error)

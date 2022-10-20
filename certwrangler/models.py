@@ -12,6 +12,7 @@ from typing import Type, NoReturn
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 from marshmallow_dataclass import dataclass
+from certwrangler.dns import resolve_zone
 from certwrangler.types import (
     RSAKey,
     X509Certificate,
@@ -148,6 +149,17 @@ class Solver(DriverController):
             "deserialization_schema_selector": SolverDriver.schema_factory,
         },
     )
+    zones: list[Domain] = field(default_factory=list)
+
+    @marshmallow.validates("zones")
+    def __validate_zones(self, values) -> NoReturn:
+        errors = []
+        for zone in values:
+            resolved_zone = resolve_zone(zone)
+            if zone != resolved_zone:
+                errors.append(f"Invalid zone, SOA for '{zone}' is '{resolved_zone}'.")
+        if errors:
+            raise marshmallow.ValidationError(errors)
 
     def create(self, name: str, domain: str, content: str) -> None:
         return self.driver.create(name, domain, content)
@@ -245,10 +257,11 @@ class Cert(Stateful):
         default_factory=lambda: ["default"], metadata={"data_key": "stores"}
     )
     account_name: str = field(default="default", metadata={"data_key": "account"})
-    solver_name: str = field(default="default", metadata={"data_key": "solver"})
     subject_name: str = field(default="default", metadata={"data_key": "subject"})
     alt_names: list[Domain] = field(default_factory=list)
-    wait_time: int = 60
+    wait_timeout: TimeDelta = field(
+        default=timedelta(seconds=300), metadata={"precision": "seconds"}
+    )
     key_size: int = 2048
     follow_cnames: bool = True
     renewal_threshold: TimeDelta = field(
@@ -259,7 +272,7 @@ class Cert(Stateful):
         self.state_subdir = "certs"
         self.state_class = CertState
         self.account = None
-        self.solver = None
+        self.solvers = {}
         self.stores = []
         self.subject = None
 
@@ -267,6 +280,13 @@ class Cert(Stateful):
         """Publish our cert and key to the stores."""
         for store in self.stores:
             store.publish(self)
+
+    def get_solver_for_zone(self, zone: str) -> Solver | None:
+        """Finds a solver for a given zone name."""
+        for solver in self.solvers.values():
+            if zone in solver.zones:
+                return solver
+        raise ValueError(f"Unable to find solver for zone {zone}.")
 
     @marshmallow.validates("stores_names")
     def __validate_unique_stores(self, values) -> NoReturn:
@@ -350,11 +370,8 @@ class Config:
                 cert.account = self.accounts[cert.account_name]
             except KeyError:
                 cert_errors["account"] = f"No account named '{cert.account_name}'."
-            # Set solver ref
-            try:
-                cert.solver = self.solvers[cert.solver_name]
-            except KeyError:
-                cert_errors["solver"] = f"No solver named '{cert.solver_name}'."
+            # Set solvers ref
+            cert.solvers = self.solvers
             # Set subject ref
             try:
                 cert.subject = self.subjects[cert.subject_name]
