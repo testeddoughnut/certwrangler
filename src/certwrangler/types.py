@@ -1,7 +1,6 @@
 from datetime import timedelta
 from typing import Any, Dict, Union
 
-import josepy as jose
 from acme import messages
 from cryptography import fernet, x509
 from cryptography.hazmat.primitives import serialization
@@ -70,18 +69,6 @@ X509CSR = Annotated[
         lambda value: value.public_bytes(serialization.Encoding.PEM).decode()
     ),
     WithJsonSchema({"type": "string"}),
-]
-
-
-JWKRSAKey = Annotated[
-    jose.JWK,
-    BeforeValidator(
-        lambda value: (
-            jose.JWKRSA.from_json(value) if isinstance(value, dict) else value
-        ),
-    ),
-    PlainSerializer(lambda value: value.to_json()),
-    WithJsonSchema({"type": "object"}),
 ]
 
 

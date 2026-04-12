@@ -1,7 +1,10 @@
+import josepy.jwk
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from pydantic import Field, ValidationError
 
-from certwrangler.models import Account, CertState, StateModel
+from certwrangler.models import Account, AccountState, CertState, StateModel
 
 
 class TestStateModel:
@@ -144,6 +147,53 @@ class TestAccount:
             match=("Duplicate emails not allowed."),
         ):
             Account(**bad_config)
+
+    def test_account_state_jwk(self):
+        """
+        Test the lazy jwk property of AccountState.
+        """
+        # Test with no key
+        state = AccountState()
+        assert state.jwk is None
+
+        # Test with a key
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        state.key = private_key
+
+        jwk = state.jwk
+        assert isinstance(jwk, josepy.jwk.JWKRSA)
+        assert jwk == josepy.jwk.JWKRSA(key=private_key)
+
+        # Test caching
+        assert state.jwk is jwk
+
+    def test_account_state_invalid_key(self):
+        """
+        Test that invalid PEM keys raise a ValidationError.
+        """
+        with pytest.raises(ValidationError):
+            AccountState(key="this is not a pem key")
+
+    def test_account_state_pem_loading(self):
+        """
+        Test that PEM strings are correctly loaded into RSAKey objects.
+        """
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode()
+
+        state = AccountState(key=pem)
+
+        # Compare private keys by converting them back to PEM
+        state_pem = state.key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode()
+        assert state_pem == pem
 
 
 class TestCertState:

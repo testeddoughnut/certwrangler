@@ -62,10 +62,10 @@ def _get_acme_client(account: Account) -> acme_client.ClientV2:
 
     :raises ControllerError: Raised if no account key is in the state.
     """
-    if account.state.key is None:
+    if account.state.jwk is None:
         raise ControllerError("Unable to create client, no account key in state.")
     net = acme_client.ClientNetwork(
-        account.state.key, account=account.state.registration, user_agent=USER_AGENT
+        account.state.jwk, account=account.state.registration, user_agent=USER_AGENT
     )
     acme_server = str(account.server)
     directory = acme_messages.Directory.from_json(net.get(acme_server).json())
@@ -103,10 +103,8 @@ class AccountController:
         Create a new key and reset the account state.
         """
 
-        new_key = jose.JWKRSA(
-            key=rsa.generate_private_key(
-                public_exponent=65537, key_size=self.account.key_size
-            )
+        new_key = rsa.generate_private_key(
+            public_exponent=65537, key_size=self.account.key_size
         )
         self.account.state = AccountState(key=new_key, key_size=self.account.key_size)
         self.state_manager.save(self.account)
@@ -154,11 +152,10 @@ class AccountController:
         if not self.account.state.registration:
             raise ControllerError("No registration found.")
 
-        new_private_key = jose.JWKRSA(
-            key=rsa.generate_private_key(
-                public_exponent=65537, key_size=self.account.key_size
-            )
+        new_key = rsa.generate_private_key(
+            public_exponent=65537, key_size=self.account.key_size
         )
+        new_account_state = AccountState(key=new_key, key_size=self.account.key_size)
 
         # The certbot ACME library doesn't implement this call so we have to craft
         # it ourselves. The operation is described in RFC 8555 section 7.3.5:
@@ -167,6 +164,10 @@ class AccountController:
         # account uri that's signed by the new key, encapsulated by an outer
         # message signed by the old key, showing that the holder(s) of both keys
         # consent to the change.
+
+        if new_account_state.jwk is None:
+            # This is mostly here to make type checking happy.
+            raise ControllerError("No jwk returned from new account state!")
 
         inner_message = acme_jws.JWS.sign(
             AccountKeyChangeMessage.from_json(
@@ -177,7 +178,7 @@ class AccountController:
             )
             .json_dumps()
             .encode(),
-            new_private_key,
+            new_account_state.jwk,
             jose.RS256,
             None,
             url=self.client.directory["keyChange"],
@@ -189,9 +190,7 @@ class AccountController:
         if response.status_code != 200:
             raise ControllerError(response.reason)
         # Now we reset our state with the new key.
-        self.account.state = AccountState(
-            key=new_private_key, key_size=self.account.key_size
-        )
+        self.account.state = new_account_state
         self.state_manager.save(self.account)
         # Get a new client since the key changed.
         self._client = _get_acme_client(self.account)
@@ -359,7 +358,7 @@ class CertController:
         log.info(f"Submitting challenges for validation for cert '{self.cert.name}'...")
         for _, challenge in challenges:
             self.client.answer_challenge(
-                challenge, challenge.response(self.cert.account.state.key)
+                challenge, challenge.response(self.cert.account.state.jwk)
             )
         deadline = datetime.datetime.now() + datetime.timedelta(seconds=90)
         try:
@@ -605,7 +604,7 @@ class CertController:
             except ValueError as error:
                 raise ControllerError(error) from error
             name = ".".join(challenge_name.split(".")[: -len(zone.split("."))])
-            token = challenge.validation(self.cert.account.state.key)
+            token = challenge.validation(self.cert.account.state.jwk)
             try:
                 solver = self.cert.get_solver_for_zone(zone)
             except ValueError as error:

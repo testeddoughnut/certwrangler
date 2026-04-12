@@ -2,7 +2,6 @@ import datetime
 import json
 import logging
 
-import josepy as jose
 import pytest
 from acme import challenges as acme_challenges
 from acme import client as acme_client
@@ -34,15 +33,13 @@ def test__get_acme_client(account, mocker):
     ):
         _get_acme_client(account)
     # Now generate a key and try again
-    new_key = jose.JWKRSA(
-        key=rsa.generate_private_key(public_exponent=65537, key_size=account.key_size)
-    )
+    new_key = rsa.generate_private_key(public_exponent=65537, key_size=account.key_size)
     account.state = AccountState(key=new_key, key_size=account.key_size)
     account.state.registration = "test123"
     client = _get_acme_client(account)
     assert isinstance(client, acme_client.ClientV2)
     mocked_net.assert_called_once_with(
-        account.state.key, account="test123", user_agent="certwrangler"
+        account.state.jwk, account="test123", user_agent="certwrangler"
     )
 
 
@@ -72,10 +69,8 @@ class TestAccountController:
         ):
             account_controller.client
         # make a key so we can access the client
-        new_key = jose.JWKRSA(
-            key=rsa.generate_private_key(
-                public_exponent=65537, key_size=account.key_size
-            )
+        new_key = rsa.generate_private_key(
+            public_exponent=65537, key_size=account.key_size
         )
         account.state = AccountState(key=new_key, key_size=account.key_size)
         # then make sure we generate the client dynamically when it's requested
@@ -175,7 +170,7 @@ class TestAccountController:
         assert post_mock.call_args_list[0].args[0] == dummy_endpoint
         # verify that the inner message was signed by the new key
         inner_message = post_mock.call_args_list[0].args[1]
-        assert inner_message.verify(new_key.public_key())
+        assert inner_message.verify(account.state.jwk.public_key())
         # verify that the payload of the inner message is what we expect.
         payload = AccountKeyChangeMessage.from_json(json.loads(inner_message.payload))
         assert payload["account"] == old_registration.uri

@@ -20,6 +20,7 @@ from cryptography import x509
 from cryptography.fernet import MultiFernet
 from cryptography.x509.oid import NameOID
 from importlib_metadata import entry_points
+from josepy.jwk import JWKRSA
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -46,7 +47,6 @@ from certwrangler.types import (
     Days,
     Domain,
     FernetKey,
-    JWKRSAKey,
     LocalityOID,
     Order,
     OrganizationalUnitOID,
@@ -313,11 +313,21 @@ class AccountState(StateModel):
     registration: Optional[Registration] = Field(
         None, description="The ACME registration record."
     )
-    key: Optional[JWKRSAKey] = Field(None, description="The current RSA key.")
+    key: Optional[RSAKey] = Field(None, description="The current RSA key.")
     key_size: Optional[int] = Field(
         None, description="The size of the current RSA key in bits."
     )
     status: AccountStatus = AccountStatus.new
+
+    _jwk: Optional[JWKRSA] = PrivateAttr(default=None)
+
+    @property
+    def jwk(self) -> Optional[JWKRSA]:
+        if not self.key:
+            return None
+        if not self._jwk:
+            self._jwk = JWKRSA(key=self.key)
+        return self._jwk
 
 
 class Account(NamedModel):
@@ -439,8 +449,7 @@ class Cert(NamedModel):
     )
     store_names: List[str] = Field(
         ...,
-        description="A list of the configured stores the cert should be "
-        "published to.",
+        description="A list of the configured stores the cert should be published to.",
     )
     store_key: Optional[str] = Field(
         None,

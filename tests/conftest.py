@@ -241,12 +241,13 @@ def account_state(account):
     """
     Create a fake registration object in the account state.
     """
-    private_key = jose.JWKRSA(
-        key=rsa.generate_private_key(public_exponent=65537, key_size=account.key_size)
+    private_key = rsa.generate_private_key(
+        public_exponent=65537, key_size=account.key_size
     )
+    jwk = jose.JWKRSA(key=private_key)
     regr = acme_messages.RegistrationResource(
         body=acme_messages.Registration.from_data(
-            key=private_key.public_key(),
+            key=jwk.public_key(),
             email=",".join(account.emails),
             terms_of_service_agreed=True,
             status="valid",
