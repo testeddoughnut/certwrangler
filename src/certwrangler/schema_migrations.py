@@ -4,8 +4,8 @@ This module contains state schema migrations that should be applied.
 
 from typing import Any, Callable, Dict, List
 
-import josepy.jwk
 from cryptography.hazmat.primitives import serialization
+from josepy.jwk import JWKRSA
 
 
 def _account_migration_00_switch_jwk_to_pem(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -16,7 +16,7 @@ def _account_migration_00_switch_jwk_to_pem(data: Dict[str, Any]) -> Dict[str, A
     if not isinstance(key, dict):
         data["key"] = key
         return data
-    jwk = josepy.jwk.JWKRSA.from_json(key)
+    jwk = JWKRSA.from_json(key)
     # Access the internal cryptography key. josepy doesn't provide a public API for this.
     wrapped_key = jwk.key._wrapped  # type: ignore[attr-defined]
     data["key"] = wrapped_key.private_bytes(
@@ -49,12 +49,27 @@ def _cert_migration_00_add_chain(data: Dict[str, Any]) -> Dict[str, Any]:
     return data
 
 
+def _account_and_cert_migration_01_add_key_algorithm(
+    data: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Add key_algorithm field to account and cert states.
+
+    Existing states without this field are assumed to be RSA.
+    """
+    if "key_algorithm" not in data:
+        data["key_algorithm"] = "RSA"
+    return data
+
+
 # State schema migrations.
 # Order matters! Migrations are applied in the order they are defined in this list.
 # The _schema_version saved to the state is based on the length of these lists.
 ACCOUNT_STATE_SCHEMA_MIGRATIONS: List[Callable[[Dict[str, Any]], Dict[str, Any]]] = [
     _account_migration_00_switch_jwk_to_pem,
+    _account_and_cert_migration_01_add_key_algorithm,
 ]
 CERT_STATE_SCHEMA_MIGRATIONS: List[Callable[[Dict[str, Any]], Dict[str, Any]]] = [
     _cert_migration_00_add_chain,
+    _account_and_cert_migration_01_add_key_algorithm,
 ]

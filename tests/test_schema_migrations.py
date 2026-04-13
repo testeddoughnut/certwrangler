@@ -3,6 +3,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from certwrangler.schema_migrations import (
+    _account_and_cert_migration_01_add_key_algorithm,
     _account_migration_00_switch_jwk_to_pem,
     _cert_migration_00_add_chain,
 )
@@ -76,4 +77,25 @@ class TestCertStateSchemaMigrations:
         }
         assert _cert_migration_00_add_chain(data) == {
             "chain": ["test intermediate 1", "test intermediate 2", "test ca"]
+        }
+
+
+class TestCommonSchemaMigrations:
+    """
+    Tests for common state schema migrations.
+    """
+
+    def test__account_and_cert_migration_01_add_key_algorithm(self):
+        """
+        Test that we add key_algorithm correctly.
+        """
+        # Test without key_algorithm
+        data = {"some_other_field": "value"}
+        migrated_data = _account_and_cert_migration_01_add_key_algorithm(data)
+        assert migrated_data["key_algorithm"] == "RSA"
+
+        # Test with key_algorithm already present
+        data = {"key_algorithm": "EC"}
+        assert _account_and_cert_migration_01_add_key_algorithm(data) == {
+            "key_algorithm": "EC"
         }

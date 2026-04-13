@@ -16,9 +16,8 @@ from ipaddress import IPv4Address
 from pathlib import Path
 from typing import Any, Callable, ClassVar, Dict, List, Literal, Optional, Union
 
-from cryptography import x509
 from cryptography.fernet import MultiFernet
-from cryptography.x509.oid import NameOID
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from importlib_metadata import entry_points
 from josepy.jwk import JWKRSA
 from pydantic import (
@@ -47,12 +46,14 @@ from certwrangler.types import (
     Days,
     Domain,
     FernetKey,
+    KeyAlgorithm,
+    KeyCurve,
     LocalityOID,
     Order,
     OrganizationalUnitOID,
     OrganizationOID,
+    PrivateKey,
     Registration,
-    RSAKey,
     StateOrProvinceOID,
     X509Certificate,
 )
@@ -313,7 +314,15 @@ class AccountState(StateModel):
     registration: Optional[Registration] = Field(
         None, description="The ACME registration record."
     )
-    key: Optional[RSAKey] = Field(None, description="The current RSA key.")
+    key: Optional[PrivateKey] = Field(
+        None, description="The current account key (RSA or EC)."
+    )
+    key_algorithm: Optional[KeyAlgorithm] = Field(
+        None, description="The key algorithm (RSA or EC)."
+    )
+    key_curve: Optional[KeyCurve] = Field(
+        None, description="The EC curve used (e.g., P-256, P-384)."
+    )
     key_size: Optional[int] = Field(
         None, description="The size of the current RSA key in bits."
     )
@@ -343,6 +352,12 @@ class Account(NamedModel):
     server: HttpUrl = Field(
         HttpUrl("https://acme-v02.api.letsencrypt.org/directory"),
         description="The URL of the ACME server.",
+    )
+    key_algorithm: KeyAlgorithm = Field(
+        rsa.RSAPrivateKey, description="The key algorithm to use (RSA or EC)."
+    )
+    key_curve: KeyCurve = Field(
+        ec.SECP256R1, description="The EC curve to use when key_algorithm is EC."
     )
     key_size: int = Field(2048, description="The desired size of the RSA key in bits")
 
@@ -404,7 +419,15 @@ class CertState(StateModel):
     url: Optional[str] = Field(
         None, description="The URL of the cert retrieved from the ACME server."
     )
-    key: Optional[RSAKey] = Field(None, description="The cert's RSA key.")
+    key: Optional[PrivateKey] = Field(
+        None, description="The cert's private key (RSA or ECDSA)."
+    )
+    key_algorithm: Optional[KeyAlgorithm] = Field(
+        None, description="The key algorithm (RSA or EC)."
+    )
+    key_curve: Optional[KeyCurve] = Field(
+        None, description="The EC curve used (e.g., P-256, P-384)."
+    )
     key_size: Optional[int] = Field(
         None, description="The size of the RSA key in bits."
     )
@@ -466,6 +489,12 @@ class Cert(NamedModel):
     )
     wait_timeout: timedelta = Field(
         default=timedelta(seconds=300), description="Wait timeout for DNS operations."
+    )
+    key_algorithm: KeyAlgorithm = Field(
+        rsa.RSAPrivateKey, description="The key algorithm to use (RSA or EC)."
+    )
+    key_curve: KeyCurve = Field(
+        ec.SECP256R1, description="The EC curve to use when key_algorithm is EC."
     )
     key_size: int = Field(2048, description="The desired size of the RSA key in bits.")
     follow_cnames: bool = Field(
@@ -571,47 +600,6 @@ class Cert(NamedModel):
         if not self.state.cert:
             return timedelta()
         return self.state.cert.not_valid_after_utc - datetime.now(timezone.utc)
-
-    @property
-    def needs_renewal(self) -> bool:
-        """
-        Check if a cert needs to be renewed by checking its expiry time is less
-        than ``renewal_threshold``, or if it's ``common_name`` or
-        ``alternative_names`` changed.
-
-        We specifically don't check for the ``subject`` since apparently LE
-        strips that out.
-
-        :returns: A ``bool`` representing if the cert should be renewed.
-        """
-        if not self.state.cert:
-            log.info(f"No cert present in state for cert '{self.name}'.")
-            return True
-        if self.time_left < self.renewal_threshold:
-            log.info(
-                f"Cert '{self.name}' expires in {self.time_left.days} days, "
-                f"(threshold {self.renewal_threshold.days}).'"
-            )
-            return True
-        state_common_name = self.state.cert.subject.get_attributes_for_oid(
-            NameOID.COMMON_NAME
-        )[0].value
-        if self.common_name != state_common_name:
-            log.info(f"Common name changed on cert '{self.name}'.")
-            return True
-        # This only works for certs with DNS alt names
-        alt_names = sorted(
-            self.state.cert.extensions.get_extension_for_class(
-                x509.SubjectAlternativeName
-            ).value.get_values_for_type(x509.general_name.DNSName)
-        )
-        if set([self.common_name] + self.alt_names) != set(alt_names):
-            log.debug(
-                f"'{set([self.common_name] + self.alt_names)}' does not equal '{set(alt_names)}'."
-            )
-            log.info(f"Alternative names changed on cert '{self.name}'.")
-            return True
-        return False
 
 
 class ReconcilerConfig(BaseModel):

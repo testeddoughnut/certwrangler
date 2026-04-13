@@ -10,6 +10,7 @@ from acme import messages as acme_messages
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import ExtensionOID, NameOID
+from josepy.jwa import RS256
 
 from certwrangler.controllers import (
     AccountController,
@@ -34,12 +35,17 @@ def test__get_acme_client(account, mocker):
         _get_acme_client(account)
     # Now generate a key and try again
     new_key = rsa.generate_private_key(public_exponent=65537, key_size=account.key_size)
-    account.state = AccountState(key=new_key, key_size=account.key_size)
+    account.state = AccountState(
+        key=new_key,
+        key_algorithm=account.key_algorithm,
+        key_curve=account.key_curve,
+        key_size=account.key_size,
+    )
     account.state.registration = "test123"
     client = _get_acme_client(account)
     assert isinstance(client, acme_client.ClientV2)
     mocked_net.assert_called_once_with(
-        account.state.jwk, account="test123", user_agent="certwrangler"
+        account.state.jwk, account="test123", alg=RS256, user_agent="certwrangler"
     )
 
 
@@ -72,7 +78,12 @@ class TestAccountController:
         new_key = rsa.generate_private_key(
             public_exponent=65537, key_size=account.key_size
         )
-        account.state = AccountState(key=new_key, key_size=account.key_size)
+        account.state = AccountState(
+            key=new_key,
+            key_algorithm=account.key_algorithm,
+            key_curve=account.key_curve,
+            key_size=account.key_size,
+        )
         # then make sure we generate the client dynamically when it's requested
         assert account_controller._client is None
         assert isinstance(account_controller.client, acme_client.ClientV2)

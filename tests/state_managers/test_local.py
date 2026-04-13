@@ -280,6 +280,8 @@ class TestLocalStateManager:
                 {{
                     "registration": null,
                     "key": null,
+                    "key_algorithm": null,
+                    "key_curve": null,
                     "key_size": 12345,
                     "status": "new",
                     "_schema_version": {account.state._schema_version}
@@ -307,6 +309,8 @@ class TestLocalStateManager:
                 {{
                     "url": null,
                     "key": null,
+                    "key_algorithm": null,
+                    "key_curve": null,
                     "key_size": 12345,
                     "cert": null,
                     "chain": null,
@@ -341,6 +345,8 @@ class TestLocalStateManager:
                 {{
                     "registration": null,
                     "key": null,
+                    "key_algorithm": null,
+                    "key_curve": null,
                     "key_size": 12345,
                     "status": "new",
                     "_schema_version": {account.state._schema_version}

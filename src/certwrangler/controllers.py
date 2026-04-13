@@ -9,7 +9,6 @@ import datetime
 import logging
 from typing import List, Optional, Tuple, Union
 
-import josepy as jose
 from acme import challenges as acme_challenges
 from acme import client as acme_client
 from acme import errors as acme_errors
@@ -17,8 +16,17 @@ from acme import jws as acme_jws
 from acme import messages as acme_messages
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.x509.oid import NameOID
+from josepy.json_util import field as josepy_field
+from josepy.jwa import (
+    ES256,
+    ES384,
+    ES512,
+    RS256,
+    JWASignature,
+)
+from josepy.jwk import JWK
 
 from certwrangler.dns import resolve_cname, resolve_zone, wait_for_challenges
 from certwrangler.exceptions import ControllerError, SolverError, StoreError
@@ -31,9 +39,59 @@ from certwrangler.models import (
     Solver,
     StateManager,
 )
+from certwrangler.types import KeyAlgorithm, KeyCurve, PrivateKey
 
 USER_AGENT = "certwrangler"
 log = logging.getLogger(__name__)
+
+
+def _generate_private_key(
+    new_key_algorithm: KeyAlgorithm,
+    new_key_curve: Optional[KeyCurve] = None,
+    new_key_size: Optional[int] = None,
+) -> Tuple[
+    PrivateKey,
+    Optional[KeyCurve],
+    Optional[int],
+]:
+    if new_key_algorithm == ec.EllipticCurvePrivateKey:
+        # Generate ECDSA key
+        if new_key_curve is None:
+            raise ControllerError(
+                "new_key_curve must be provided for ECDSA key generation"
+            )
+        return ec.generate_private_key(new_key_curve()), new_key_curve, None
+    elif new_key_algorithm == rsa.RSAPrivateKey:
+        # Generate RSA key
+        if new_key_size is None:
+            raise ControllerError(
+                "new_key_size must be provided for RSA key generation"
+            )
+        return (
+            rsa.generate_private_key(public_exponent=65537, key_size=new_key_size),
+            None,
+            new_key_size,
+        )
+    raise ControllerError(f"Unknown key_algorithm {new_key_algorithm}")
+
+
+def _get_signing_algorithm(
+    key_algorithm: KeyAlgorithm,
+    key_curve: Optional[KeyCurve] = None,
+) -> JWASignature:
+    if key_algorithm == ec.EllipticCurvePrivateKey:
+        if key_curve is None:
+            raise ControllerError("key_curve must be provided for ECDSA key generation")
+        if key_curve == ec.SECP256R1:
+            return ES256
+        elif key_curve == ec.SECP384R1:
+            return ES384
+        elif key_curve == ec.SECP521R1:
+            return ES512
+        raise ControllerError(f"Unknown key_curve {key_curve}")
+    elif key_algorithm == rsa.RSAPrivateKey:
+        return RS256
+    raise ControllerError(f"Unknown key_algorithm {key_algorithm}")
 
 
 class AccountKeyChangeMessage(acme_messages.ResourceBody):
@@ -41,12 +99,12 @@ class AccountKeyChangeMessage(acme_messages.ResourceBody):
     Account Key change message since the acme library doesn't seem to have this.
     """
 
-    oldKey: jose.JWK = jose.field("oldKey", decoder=jose.JWK.from_json)
+    oldKey: JWK = josepy_field("oldKey", decoder=JWK.from_json)
     """
     The old public key.
     """
 
-    account: str = jose.field("account")
+    account: str = josepy_field("account")
     """
     The URI of the account.
     """
@@ -64,8 +122,14 @@ def _get_acme_client(account: Account) -> acme_client.ClientV2:
     """
     if account.state.jwk is None:
         raise ControllerError("Unable to create client, no account key in state.")
+    if not account.state.key_algorithm:
+        raise ControllerError("Unable to create client, no key algorithm in state.")
+    alg = _get_signing_algorithm(account.state.key_algorithm, account.state.key_curve)
     net = acme_client.ClientNetwork(
-        account.state.jwk, account=account.state.registration, user_agent=USER_AGENT
+        account.state.jwk,
+        account=account.state.registration,
+        alg=alg,
+        user_agent=USER_AGENT,
     )
     acme_server = str(account.server)
     directory = acme_messages.Directory.from_json(net.get(acme_server).json())
@@ -103,10 +167,17 @@ class AccountController:
         Create a new key and reset the account state.
         """
 
-        new_key = rsa.generate_private_key(
-            public_exponent=65537, key_size=self.account.key_size
+        new_key, new_key_curve, new_key_size = _generate_private_key(
+            self.account.key_algorithm,
+            new_key_curve=self.account.key_curve,
+            new_key_size=self.account.key_size,
         )
-        self.account.state = AccountState(key=new_key, key_size=self.account.key_size)
+        self.account.state = AccountState(
+            key=new_key,
+            key_algorithm=self.account.key_algorithm,
+            key_curve=new_key_curve,
+            key_size=new_key_size,
+        )
         self.state_manager.save(self.account)
         self._client = _get_acme_client(self.account)
 
@@ -152,10 +223,17 @@ class AccountController:
         if not self.account.state.registration:
             raise ControllerError("No registration found.")
 
-        new_key = rsa.generate_private_key(
-            public_exponent=65537, key_size=self.account.key_size
+        new_key, new_key_curve, new_key_size = _generate_private_key(
+            self.account.key_algorithm,
+            new_key_curve=self.account.key_curve,
+            new_key_size=self.account.key_size,
         )
-        new_account_state = AccountState(key=new_key, key_size=self.account.key_size)
+        new_account_state = AccountState(
+            key=new_key,
+            key_algorithm=self.account.key_algorithm,
+            key_curve=new_key_curve,
+            key_size=new_key_size,
+        )
 
         # The certbot ACME library doesn't implement this call so we have to craft
         # it ourselves. The operation is described in RFC 8555 section 7.3.5:
@@ -168,7 +246,12 @@ class AccountController:
         if new_account_state.jwk is None:
             # This is mostly here to make type checking happy.
             raise ControllerError("No jwk returned from new account state!")
-
+        if not new_account_state.key_algorithm:
+            # This is mostly here to make type checking happy.
+            raise ControllerError("No key algorithm in new account state!")
+        alg = _get_signing_algorithm(
+            new_account_state.key_algorithm, new_account_state.key_curve
+        )
         inner_message = acme_jws.JWS.sign(
             AccountKeyChangeMessage.from_json(
                 {
@@ -179,7 +262,7 @@ class AccountController:
             .json_dumps()
             .encode(),
             new_account_state.jwk,
-            jose.RS256,
+            alg,
             None,
             url=self.client.directory["keyChange"],
             kid=None,
@@ -251,10 +334,17 @@ class CertController:
         Create a new key and reset the cert state.
         """
 
-        new_key = rsa.generate_private_key(
-            public_exponent=65537, key_size=self.cert.key_size
+        new_key, new_key_curve, new_key_size = _generate_private_key(
+            self.cert.key_algorithm,
+            new_key_curve=self.cert.key_curve,
+            new_key_size=self.cert.key_size,
         )
-        self.cert.state = CertState(key=new_key, key_size=self.cert.key_size)
+        self.cert.state = CertState(
+            key=new_key,
+            key_algorithm=self.cert.key_algorithm,
+            key_curve=new_key_curve,
+            key_size=new_key_size,
+        )
         self.state_manager.save(self.cert)
 
     def create_order(self) -> None:

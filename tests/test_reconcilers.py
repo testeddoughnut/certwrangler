@@ -59,14 +59,19 @@ def test_reconcile_account_failure(mocker, account, caplog):
 
 
 def test_reconcile_cert_no_key(mocker, cert):
-    cert.key_size = cert.state.key_size
     mock_cert_controller = mocker.MagicMock()
 
-    def _mock_key_and_cert():
+    def _create_mock_key():
         cert.state.key = "dummy key"
+        cert.state.key_size = cert.key_size
+        cert.state.key_algorithm = cert.key_algorithm
+        cert.state.key_curve = cert.key_curve
+
+    def _create_mock_cert():
         cert.state.cert = "dummy cert"
 
-    mock_cert_controller.create_order.side_effect = _mock_key_and_cert
+    mock_cert_controller.create_key.side_effect = _create_mock_key
+    mock_cert_controller.create_order.side_effect = _create_mock_cert
     mocker.patch(
         "certwrangler.reconcilers.CertController",
         return_value=mock_cert_controller,

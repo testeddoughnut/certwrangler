@@ -3,7 +3,6 @@ import os
 from pathlib import Path
 
 import click
-import josepy as jose
 import pytest
 from acme import messages as acme_messages
 from cryptography import x509
@@ -12,6 +11,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
+from josepy.jwk import JWKRSA
 
 from certwrangler.controllers import AccountController, CertController
 from certwrangler.models import AccountStatus, CertStatus
@@ -244,7 +244,7 @@ def account_state(account):
     private_key = rsa.generate_private_key(
         public_exponent=65537, key_size=account.key_size
     )
-    jwk = jose.JWKRSA(key=private_key)
+    jwk = JWKRSA(key=private_key)
     regr = acme_messages.RegistrationResource(
         body=acme_messages.Registration.from_data(
             key=jwk.public_key(),
@@ -255,6 +255,8 @@ def account_state(account):
         uri="https://acme-staging-v02.api.example.com/acme/acct/12345",
     )
     account.state.key = private_key
+    account.state.key_algorithm = account.key_algorithm
+    account.state.key_curve = account.key_curve
     account.state.key_size = account.key_size
     account.state.registration = regr
     account.state.status = AccountStatus.active
