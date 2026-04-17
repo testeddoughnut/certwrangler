@@ -44,13 +44,27 @@ state:
   #   - example_key
 
 accounts:
-  default:
+  # RSA account example
+  rsa_account:
     emails:
       - this.is.me@example.com
     # This example is set to the staging environment for testing.
     # The default value is the Let's Encrypt production endpoint.
     server: https://acme-staging-v02.api.letsencrypt.org/directory
+    # key_algorithm: "RSA" (default) or "EC"
+    # key_size: RSA key size in bits (default 2048)
+    key_algorithm: RSA
     key_size: 4096
+
+  # EC account example
+  ec_account:
+    emails:
+      - this.is.me@example.com
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    # key_algorithm: "RSA" (default) or "EC"
+    # key_curve: EC curve for EC keys - "P-256" (default), "P-384", or "P-521"
+    key_algorithm: EC
+    key_curve: P-256
 
 subjects:
   # This feature can probably be removed, Let's Encrypt doesn't bother with using them.
@@ -112,8 +126,9 @@ solvers:
   #   access_token: $$CERTWRANGLER_EDGE_ACCESS_TOKEN
 
 certs:
-  example.com:
-    account_name: default
+  # RSA cert example
+  rsa_cert:
+    account_name: rsa_account
     subject_name: default
     store_names:
       - default
@@ -125,8 +140,27 @@ certs:
     common_name: example.com
     alt_names:
       - www.example.com
+    # key_algorithm: "RSA" (default) or "EC"
+    # key_size: RSA key size in bits (default 2048)
+    key_algorithm: RSA
     key_size: 4096
     # The timeout for waiting for DNS propagation.
     # If this expires certwrangler gives up on waiting
     # but leaves the order open to try again on the next run.
+    wait_timeout: 120
+
+  # EC cert example
+  ec_cert:
+    account_name: ec_account
+    subject_name: default
+    store_names:
+      - default
+      - backup
+    common_name: example.com
+    alt_names:
+      - www.example.com
+    # key_algorithm: "RSA" (default) or "EC"
+    # key_curve: EC curve for EC keys - "P-256" (default), "P-384", or "P-521"
+    key_algorithm: EC
+    key_curve: P-256
     wait_timeout: 120

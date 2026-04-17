@@ -19,7 +19,7 @@ from typing import Any, Callable, ClassVar, Dict, List, Literal, Optional, Union
 from cryptography.fernet import MultiFernet
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from importlib_metadata import entry_points
-from josepy.jwk import JWKRSA
+from josepy.jwk import JWK, JWKEC, JWKRSA
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -328,15 +328,18 @@ class AccountState(StateModel):
     )
     status: AccountStatus = AccountStatus.new
 
-    _jwk: Optional[JWKRSA] = PrivateAttr(default=None)
-
     @property
-    def jwk(self) -> Optional[JWKRSA]:
+    def jwk(self) -> Optional[JWK]:
         if not self.key:
             return None
-        if not self._jwk:
-            self._jwk = JWKRSA(key=self.key)
-        return self._jwk
+        if isinstance(self.key, ec.EllipticCurvePrivateKey):
+            return JWKEC(key=self.key)
+        if isinstance(self.key, rsa.RSAPrivateKey):
+            return JWKRSA(key=self.key)
+        raise ValueError(
+            f"Unsupported key type: {type(self.key).__name__}. "
+            "Supported types: RSA or ECDSA."
+        )
 
 
 class Account(NamedModel):

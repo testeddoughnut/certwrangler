@@ -27,7 +27,7 @@ class TestAccountStateSchemaMigrations:
 
         # Verify it's now a PEM string
         assert isinstance(migrated_data["key"], str)
-        assert migrated_data["key"].startswith("-----BEGIN RSA PRIVATE KEY-----")
+        assert migrated_data["key"].startswith("-----BEGIN PRIVATE KEY-----")
 
         # Verify the PEM is valid and matches the original key
         loaded_key = serialization.load_pem_private_key(

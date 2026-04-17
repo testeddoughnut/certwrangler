@@ -15,6 +15,10 @@ certs:
     common_name: example.com
     alt_names:
       - www.example.com
+    # key_algorithm: "RSA" (default) or "EC"
+    # key_size: RSA key size in bits (default 2048)
+    # key_curve: EC curve for EC keys - "P-256" (default), "P-384", or "P-521"
+    key_algorithm: RSA
     key_size: 4096
     wait_timeout: 120
 ```
@@ -50,6 +54,10 @@ accounts:
     # This example is set to the staging environment for testing.
     # The default value is the Let's Encrypt production endpoint.
     server: https://acme-staging-v02.api.letsencrypt.org/directory
+    # key_algorithm: "RSA" (default) or "EC"
+    # key_size: RSA key size in bits (default 2048)
+    # key_curve: EC curve for EC keys - "P-256" (default), "P-384", or "P-521"
+    key_algorithm: RSA
     key_size: 4096
 ```
 The account to use can be specified on a per-certificate basis.

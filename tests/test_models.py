@@ -1,7 +1,7 @@
 import josepy.jwk
 import pytest
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from pydantic import Field, ValidationError
 
 from certwrangler.models import Account, AccountState, CertState, StateModel
@@ -148,9 +148,9 @@ class TestAccount:
         ):
             Account(**bad_config)
 
-    def test_account_state_jwk(self):
+    def test_account_state_jwk_rsa(self):
         """
-        Test the lazy jwk property of AccountState.
+        Test the jwk property with an RSA key returns JWKRSA.
         """
         # Test with no key
         state = AccountState()
@@ -164,8 +164,27 @@ class TestAccount:
         assert isinstance(jwk, josepy.jwk.JWKRSA)
         assert jwk == josepy.jwk.JWKRSA(key=private_key)
 
-        # Test caching
-        assert state.jwk is jwk
+    def test_account_state_jwk_ec(self):
+        """
+        Test the jwk property with an EC key returns JWKEC.
+        """
+        private_key = ec.generate_private_key(ec.SECP256R1())
+        state = AccountState(key=private_key)
+
+        jwk = state.jwk
+        assert isinstance(jwk, josepy.jwk.JWKEC)
+        assert jwk == josepy.jwk.JWKEC(key=private_key)
+
+    def test_account_state_jwk_invalid_key_type(self):
+        """
+        Test that unsupported key types raise a ValueError.
+        """
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+        state = AccountState()
+        state.key = Ed25519PrivateKey.generate()
+        with pytest.raises(ValueError, match="Unsupported key type: Ed25519PrivateKey"):
+            state.jwk
 
     def test_account_state_invalid_key(self):
         """

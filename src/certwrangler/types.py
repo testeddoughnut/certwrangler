@@ -54,7 +54,7 @@ KeyAlgorithm = Annotated[
     _SupportedKeyAlgorithm,
     BeforeValidator(_algorithm_loader),
     PlainSerializer(lambda value: _algorithm_map_inverse[value]),
-    WithJsonSchema({"type": "string", "enum": _algorithm_map.keys()}),
+    WithJsonSchema({"type": "string", "enum": list(_algorithm_map.keys())}),
 ]
 
 
@@ -91,7 +91,7 @@ KeyCurve = Annotated[
     _SupportedKeyCurve,
     BeforeValidator(_curve_loader),
     PlainSerializer(lambda value: _curve_map_inverse[value]),
-    WithJsonSchema({"type": "string", "enum": _curve_map.keys()}),
+    WithJsonSchema({"type": "string", "enum": list(_curve_map.keys())}),
 ]
 
 
