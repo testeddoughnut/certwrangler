@@ -7,7 +7,7 @@ changes to this code.
 
 import datetime
 import logging
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, cast
 
 from acme import challenges as acme_challenges
 from acme import client as acme_client
@@ -81,7 +81,7 @@ def _get_signing_algorithm(
 ) -> JWASignature:
     if key_algorithm == ec.EllipticCurvePrivateKey:
         if key_curve is None:
-            raise ControllerError("key_curve must be provided for ECDSA key generation")
+            raise ControllerError("key_curve must be provided for ECDSA")
         if key_curve == ec.SECP256R1:
             return ES256
         elif key_curve == ec.SECP384R1:
@@ -243,15 +243,10 @@ class AccountController:
         # message signed by the old key, showing that the holder(s) of both keys
         # consent to the change.
 
-        if new_account_state.jwk is None:
-            # This is mostly here to make type checking happy.
-            raise ControllerError("No jwk returned from new account state!")
-        if not new_account_state.key_algorithm:
-            # This is mostly here to make type checking happy.
-            raise ControllerError("No key algorithm in new account state!")
-        alg = _get_signing_algorithm(
-            new_account_state.key_algorithm, new_account_state.key_curve
-        )
+        # These are guaranteed to be set by _generate_private_key, just telling mypy that.
+        jwk = cast(JWK, new_account_state.jwk)
+        key_algorithm = cast(KeyAlgorithm, new_account_state.key_algorithm)
+        alg = _get_signing_algorithm(key_algorithm, new_account_state.key_curve)
         inner_message = acme_jws.JWS.sign(
             AccountKeyChangeMessage.from_json(
                 {
@@ -261,7 +256,7 @@ class AccountController:
             )
             .json_dumps()
             .encode(),
-            new_account_state.jwk,
+            jwk,
             alg,
             None,
             url=self.client.directory["keyChange"],

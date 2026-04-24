@@ -210,7 +210,7 @@ def store_vault_config(store_vault_auth_token_config):
 
 @pytest.fixture(scope="function")
 def config(click_ctx):
-    click_ctx.obj.load_config()
+    click_ctx.obj.load_config(initialize=True)
     return click_ctx.obj.config
 
 

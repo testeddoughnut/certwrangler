@@ -31,22 +31,30 @@ def _needs_renewal(cert: Cert) -> bool:
     :returns: A ``bool`` representing if the cert should be renewed.
     """
 
+    if not cert.state.key:
+        log.info(f"No key present in state for cert '{cert.name}'.")
+        return True
     if not cert.state.cert:
         log.info(f"No cert present in state for cert '{cert.name}'.")
         return True
     if cert.time_left < cert.renewal_threshold:
         log.info(
             f"Cert '{cert.name}' expires in {cert.time_left.days} days, "
-            f"(threshold {cert.renewal_threshold.days})."
+            f"threshold {cert.renewal_threshold.days}."
         )
         return True
     state_common_name = cert.state.cert.subject.get_attributes_for_oid(
         NameOID.COMMON_NAME
     )[0].value
+    # TODO: This check needs updating when ACME profiles are added.
+    # Newer profiles are not guaranteed to include a CN.
+    # https://letsencrypt.org/docs/profiles/#certificate-common-name
     if cert.common_name != state_common_name:
         log.info(f"Common name changed on cert '{cert.name}'.")
         return True
-    # This only works for certs with DNS alt names
+    # TODO: This check needs reworking when ACME profiles are added.
+    # Profiles may support IP address SANs, which would require comparing
+    # both DNSName and IPAddress values from the cert's SAN extension.
     state_alt_names = sorted(
         cert.state.cert.extensions.get_extension_for_class(
             x509.SubjectAlternativeName
@@ -57,6 +65,9 @@ def _needs_renewal(cert: Cert) -> bool:
             f"'{set([cert.common_name] + cert.alt_names)}' does not equal '{set(state_alt_names)}'."
         )
         log.info(f"Alternative names changed on cert '{cert.name}'.")
+        return True
+    if cert.state.cert.public_key() != cert.state.key.public_key():
+        log.info(f"Cert does not match private key for cert '{cert.name}'.")
         return True
     return False
 
@@ -89,7 +100,6 @@ def _needs_key_change(entity: Union[Account, Cert]) -> bool:
             "differs from state."
         )
         return True
-
     if (
         entity.key_algorithm == rsa.RSAPrivateKey
         and entity.key_size != entity.state.key_size
@@ -154,7 +164,7 @@ def reconcile_account(account: Account, state_manager: StateManager) -> bool:
             )
             controller.register()
         if _needs_key_change(account):
-            log.info(f"Updating key for account '{account.name}'...")
+            log.info(f"Changing account key on ACME server for '{account.name}'...")
             controller.change_key()
         if account.state.registration and sorted(
             list(account.state.registration.body.emails)
@@ -192,7 +202,9 @@ def reconcile_cert(cert: Cert, state_manager: StateManager) -> bool:
             log.info(f"No key found for cert '{cert.name}', creating...")
             controller.create_key()
         if _needs_key_change(cert):
-            log.info(f"Updating key for cert '{cert.name}'...")
+            log.info(
+                f"Key configuration changed for cert '{cert.name}', regenerating key..."
+            )
             controller.create_key()
         if cert.state.order:
             log.info(f"Open order found for cert '{cert.name}', processing...")
